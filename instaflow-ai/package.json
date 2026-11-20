@@ -1,0 +1,30 @@
+{
+  "name": "instaflow-ai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "InstaFlow AI — multi-tenant Instagram automation SaaS (official Meta APIs only)",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:shared": "npm run build -w @instaflow/shared",
+    "dev": "npm run build:shared && concurrently -n api,worker,web -c magenta,cyan,blue \"npm run dev -w @instaflow/api\" \"npm run dev:worker -w @instaflow/api\" \"npm run dev -w @instaflow/web\"",
+    "build": "npm run build:shared && npm run build -w @instaflow/api && npm run build -w @instaflow/web",
+    "typecheck": "npm run build:shared && npm run typecheck -w @instaflow/shared -w @instaflow/api -w @instaflow/web",
+    "test": "npm run build:shared && npm run test -w @instaflow/shared -w @instaflow/api -w @instaflow/web",
+    "test:e2e": "npm run test:e2e -w @instaflow/web",
+    "db:migrate": "npm run db:migrate -w @instaflow/api",
+    "db:deploy": "npm run db:deploy -w @instaflow/api",
+    "db:generate": "npm run db:generate -w @instaflow/api",
+    "db:seed": "npm run db:seed -w @instaflow/api"
+  },
+  "devDependencies": {
+    "concurrently": "9.2.1",
+    "typescript": "5.9.3"
+  }
+}

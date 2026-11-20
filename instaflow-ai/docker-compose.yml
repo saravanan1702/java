@@ -1,0 +1,112 @@
+# InstaFlow AI — full local stack.
+#
+#   cp .env.example .env    # then set CSRF_SECRET and TOKEN_ENCRYPTION_KEYS
+#   docker compose up --build
+#
+# Web: http://localhost:8080   Mailpit (dev inbox): http://localhost:8025
+# Infra only (for `npm run dev`):  docker compose up -d postgres redis mailpit
+
+name: instaflow
+
+x-api-env: &api-env
+  NODE_ENV: production
+  PORT: "4000"
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  APP_URL: ${COMPOSE_APP_URL:-http://localhost:8080}
+  CORS_ORIGINS: ${COMPOSE_APP_URL:-http://localhost:8080}
+  TRUST_PROXY: "1"
+  DATABASE_URL: postgresql://instaflow:${POSTGRES_PASSWORD:-instaflow_local}@postgres:5432/instaflow
+  REDIS_URL: redis://redis:6379
+  QUEUE_MODE: queue
+  # Local compose serves plain HTTP on localhost, which browsers treat as a secure context.
+  COOKIE_SECURE: "true"
+  COOKIE_SAMESITE: lax
+  CSRF_SECRET: ${CSRF_SECRET:?Set CSRF_SECRET in .env}
+  TOKEN_ENCRYPTION_KEYS: ${TOKEN_ENCRYPTION_KEYS:?Set TOKEN_ENCRYPTION_KEYS in .env}
+  TOKEN_ENCRYPTION_ACTIVE_VERSION: ${TOKEN_ENCRYPTION_ACTIVE_VERSION:-1}
+  MAIL_TRANSPORT: smtp
+  MAIL_FROM: ${MAIL_FROM:-InstaFlow AI <no-reply@instaflow.local>}
+  SMTP_HOST: ${COMPOSE_SMTP_HOST:-mailpit}
+  SMTP_PORT: ${COMPOSE_SMTP_PORT:-1025}
+  SMTP_USER: ${COMPOSE_SMTP_USER:-}
+  SMTP_PASS: ${COMPOSE_SMTP_PASS:-}
+  RATE_LIMIT_ENABLED: "true"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: instaflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-instaflow_local}
+      POSTGRES_DB: instaflow
+    ports: ["${POSTGRES_HOST_PORT:-5432}:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U instaflow -d instaflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["${REDIS_HOST_PORT:-6379}:6379"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Local email inbox — every email the app sends shows up at http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+
+  # One-shot: apply Prisma migrations, then exit.
+  migrate:
+    build: { context: ., dockerfile: apps/api/Dockerfile, target: build }
+    command: ["npx", "prisma", "migrate", "deploy"]
+    environment:
+      DATABASE_URL: postgresql://instaflow:${POSTGRES_PASSWORD:-instaflow_local}@postgres:5432/instaflow
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    build: { context: ., dockerfile: apps/api/Dockerfile, target: runtime }
+    image: instaflow-api:local
+    environment: *api-env
+    ports: ["${API_HOST_PORT:-4000}:4000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  worker:
+    image: instaflow-api:local
+    command: ["node", "dist/worker.js"]
+    environment:
+      <<: *api-env
+      WORKER_HEALTH_PORT: "4001"
+    depends_on:
+      api: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+    stop_grace_period: 35s
+    restart: unless-stopped
+
+  web:
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    ports: ["${WEB_HOST_PORT:-8080}:8080"]
+    depends_on:
+      api: { condition: service_started }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:

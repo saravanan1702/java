@@ -1,0 +1,18 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# Secrets — never commit real environment files
+.env
+.env.*
+!.env.example
+
+# Generated
+apps/api/src/generated/
+apps/api/.mail-outbox/
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/.e2e/
+*.tsbuildinfo
